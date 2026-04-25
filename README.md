@@ -1,4 +1,7 @@
-# Export Minetest Schematic (Remesh, Lua) — Blender Addon
+# Export Minetest Schematic (Remesh, .MTS) — Blender Addon
+
+
+UPDATE: NOW EXPORTS .MTS FILES
 
 ## Overview
 This Blender addon lets you export a selected mesh as a Minetest schematic in Lua table format, using Blender's Remesh (Blocks) modifier for voxelization.
@@ -13,8 +16,8 @@ This Blender addon lets you export a selected mesh as a Minetest schematic in Lu
 1. **Create or select your mesh in Blender.**S
 2. Enter **Edit Mode** and make any edits needed.
 3. Switch back to **Object Mode**.
-4. Go to **File → Export → Minetest Schematic (Remesh, Lua)**.
-5. Choose a filename and location for your `.lua` schematic file.
+4. Go to **File → Export → Minetest Schematic (.mts)**.
+5. Choose a filename and location for your `.mts` schematic file.
 6. **Increase the Voxel Resolution** slider for higher detail and to avoid gaps in the exported schematic.
 
 ## Tips for Proper Export

@@ -142,7 +142,7 @@ class EXPORT_OT_minetest_mts(Operator, ExportHelper):
         description="Number of voxels along the largest dimension",
         default=32,
         min=8,
-        max=1000,
+        max=10000,
     )
 
     force_place_air: BoolProperty(

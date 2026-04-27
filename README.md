@@ -13,7 +13,7 @@ This Blender addon lets you export a selected mesh as a Minetest schematic in Lu
 4. Enable the addon in the Add-ons list.
 
 ## Export Instructions
-1. **Create or select your mesh in Blender.**S
+1. **Create or select your mesh in Blender.**
 2. Enter **Edit Mode** and make any edits needed.
 3. Switch back to **Object Mode**.
 4. Go to **File → Export → Minetest Schematic (.mts)**.

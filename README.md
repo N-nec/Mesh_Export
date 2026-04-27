@@ -27,7 +27,7 @@ This Blender addon lets you export a selected mesh as a Minetest schematic in Lu
 ## Installation
 1. Open Blender (2.80 or newer).
 2. Go to **Edit → Preferences → Add-ons → Install**.
-3. Select the `blender_export_minetest_schematic_remesh.py` script and install it.
+3. Select the `export_minetest_mts.py` script and install it.
 4. Enable the addon in the Add-ons list.
 
 ## Export Instructions

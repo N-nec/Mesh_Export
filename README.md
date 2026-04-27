@@ -1,22 +1,19 @@
-# Export Minetest Schematic (Remesh, .MTS) — Blender Addon
 
- 
-# =====================================================================================================================================================
-# DUAL-MODE EXPORTER
-#
+ DUAL-MODE EXPORTER
+
 # As a Blender addon (GUI):
-#   Install via Edit > Preferences > Add-ons > Install.
-#   Then File > Export > Minetest schematic (.mts).
-#
+   Install via Edit > Preferences > Add-ons > Install.
+   Then File > Export > Minetest schematic (.mts).
+
 # As a headless CLI tool (no GUI needed):
-#   blender --background --python Path/To/export_minetest_mts.py -- Path/to/Input.blend [voxel res / size] Output.mts
-#    
+   blender --background --python Path/To/export_minetest_mts.py -- Path/to/Input.blend [voxel res / size] Output.mts
+    
 #   Options:
-#     --side-padding N    Air padding on sides/bottom (default: 3)
-#     --top-padding N     Air padding above the mesh (default: 15)
-#     --no-force-air      Don't force-place air nodes
-#     --default-node NAME Default node name (default: default:stone)
-# =======================================================================================================================================================
+     --side-padding N    Air padding on sides/bottom (default: 3)
+     --top-padding N     Air padding above the mesh (default: 15)
+     --no-force-air      Don't force-place air nodes
+     --default-node NAME Default node name (default: default:stone)
+
 
 
 UPDATE: NOW EXPORTS .MTS FILES

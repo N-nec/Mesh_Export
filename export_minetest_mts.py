@@ -2,7 +2,7 @@ bl_info = {
     "name": "Export Minetest .mts (3D voxel grid, materials, progress)",
     "author": "L-Dog",
     "version": (1, 6, 0),
-    "blender": (3, 0, 0),
+    "blender": (2, 80, 0),
     "location": "File > Export > Minetest schematic (.mts)",
     "description": "Export mesh as Minetest .mts schematic. Works as a "
                    "Blender addon (GUI) or headless CLI",
@@ -36,6 +36,10 @@ import time
 import bpy
 import bmesh
 import mathutils
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 from mathutils.bvhtree import BVHTree
 
 DEFAULT_NODE = "default:stone"
@@ -229,12 +233,19 @@ class EXPORT_OT_minetest_mts(Operator, ExportHelper):
     bl_label = "Export Minetest schematic (.mts)"
     filename_ext = ".mts"
 
+
     voxel_resolution: IntProperty(
         name="Voxel resolution",
         description="Number of voxels along the largest dimension",
         default=32,
         min=8,
         max=10000,
+    )
+
+    old_machine: BoolProperty(
+        name="Old Machine Mode",
+        description="Enable safe chunking and auto-merge for low-memory systems",
+        default=False,
     )
 
     force_place_air: BoolProperty(
@@ -261,6 +272,14 @@ class EXPORT_OT_minetest_mts(Operator, ExportHelper):
         default=15,
         min=0,
         max=100,
+    )
+
+    chunk_size: IntProperty(
+        name="Chunk Size",
+        description="Chunk size in Blender units (0=auto, disables chunking)",
+        default=1,
+        min=0,
+        max=10000,
     )
 
     def execute(self, context):
@@ -301,15 +320,12 @@ class EXPORT_OT_minetest_mts(Operator, ExportHelper):
             DEFAULT_NODE,
             progress_callback=gui_progress,
         )
-
         wm.progress_end()
         bm.free()
         bpy.data.meshes.remove(mesh)
-
         if err:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
-
         self.report({'INFO'}, f"Exported {info}")
         return {'FINISHED'}
 
@@ -320,11 +336,18 @@ def menu_func_export(self, context):
         text="Minetest schematic (.mts)"
     )
 
+def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "voxel_resolution")
+        layout.prop(self, "force_place_air")
+        layout.prop(self, "air_padding")
+        layout.prop(self, "top_air_padding")
+        layout.prop(self, "chunk_size")
+        layout.prop(self, "old_machine")
 
 def register():
     bpy.utils.register_class(EXPORT_OT_minetest_mts)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
-
 
 def unregister():
     bpy.utils.unregister_class(EXPORT_OT_minetest_mts)
@@ -345,10 +368,13 @@ def _has_cli_args():
     return "--" in sys.argv
 
 
-def cli_main():
-    """Entry point for headless CLI mode."""
-    import argparse
 
+def cli_main():
+    # ...existing code for argument parsing and setup...
+    # Place chunking/export logic here, not registration lines
+    """Entry point for headless CLI mode with chunked export support."""
+    import argparse
+    import math
     argv = sys.argv
     if "--" in argv:
         argv = argv[argv.index("--") + 1:]
@@ -356,12 +382,17 @@ def cli_main():
         argv = []
 
     parser = argparse.ArgumentParser(
-        description="Export a .blend to Minetest .mts schematic (headless)."
+        description="Export a .blend to Minetest .mts schematic (headless, with chunking support).\n"
+                    "\nChunking options:\n"
+                    "  --chunk-size N         Chunk size in Blender units (0=disable chunking).\n"
+                    "  --blender-unit-to-node N  Blender units per Minetest node (default: 0.5).\n"
+                    "  --old-machine          Enable safe chunking for low-memory systems.\n"
+                    "\nExample: --chunk-size 50 --voxel_resolution 200 will export each 50x50x50 Blender unit region as a 200x200x200 node .mts file."
     )
     parser.add_argument("input_blend", help="Path to input .blend file")
     parser.add_argument("voxel_resolution", type=int,
-                        help="Voxels along largest dimension")
-    parser.add_argument("output_mts", help="Path for output .mts file")
+                        help="Voxels along largest dimension (per chunk if chunking)")
+    parser.add_argument("output_mts", help="Path for output .mts file or chunk prefix")
     parser.add_argument("--side-padding", type=int, default=3,
                         help="Air padding on sides/bottom (default: 3)")
     parser.add_argument("--top-padding", type=int, default=15,
@@ -370,14 +401,29 @@ def cli_main():
                         help="Don't force-place air nodes")
     parser.add_argument("--default-node", default=DEFAULT_NODE,
                         help="Default node name (default: default:stone)")
+    parser.add_argument("--chunk-size", type=float, default=0,
+                        help="Chunk size in Blender units (0=disable chunking)")
+    parser.add_argument("--blender-unit-to-node", type=float, default=0.5,
+                        help="How many Blender units per Minetest node (default: 0.5)")
+    parser.add_argument("--old-machine", action="store_true",
+                        help="Enable safe chunking for low-memory systems (sets chunk size to 300 if not set)")
 
     args = parser.parse_args(argv)
+
+    # Old Machine Mode: set safe chunk size if not set
+    if args.old_machine:
+        if not args.chunk_size or args.chunk_size < 1:
+            args.chunk_size = 300
+            print("[mts_exporter] Old Machine Mode: chunk size set to 300 for low-memory export.")
+        else:
+            print(f"[mts_exporter] Old Machine Mode: using user chunk size {args.chunk_size}.")
 
     print(f"[mts_exporter] Loading {args.input_blend} ...")
     bpy.ops.wm.open_mainfile(filepath=args.input_blend)
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
 
+    # Gather all mesh objects into a single bmesh
     combined_bm = bmesh.new()
     obj_for_materials = None
     mesh_count = 0
@@ -442,6 +488,128 @@ def cli_main():
 
     print(f"[mts_exporter] Merged {mesh_count} mesh object(s).")
 
+    # Get bounding box in Blender units
+    xs = [v.co.x for v in combined_bm.verts]
+    ys = [v.co.y for v in combined_bm.verts]
+    zs = [v.co.z for v in combined_bm.verts]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
+
+    # Convert to node space
+    node_x = (max_x - min_x) / args.blender_unit_to_node
+    node_y = (max_y - min_y) / args.blender_unit_to_node
+    node_z = (max_z - min_z) / args.blender_unit_to_node
+
+    if args.chunk_size > 0:
+        # Chunking enabled
+        chunk_size_nodes = int(args.chunk_size / args.blender_unit_to_node)
+        nx = math.ceil(node_x / chunk_size_nodes)
+        ny = math.ceil(node_y / chunk_size_nodes)
+        nz = math.ceil(node_z / chunk_size_nodes)
+        print(f"[mts_exporter] Chunking: {nx} x {ny} x {nz} chunks of {chunk_size_nodes} nodes each")
+        MAX_VOXELS_PER_CHUNK = 10_000_000  # 10 million
+        for cx in range(nx):
+            for cy in range(ny):
+                for cz in range(nz):
+                    # Compute chunk bounds in Blender units
+                    chunk_min_x = min_x + cx * args.chunk_size
+                    chunk_max_x = min(chunk_min_x + args.chunk_size, max_x)
+                    chunk_min_y = min_y + cy * args.chunk_size
+                    chunk_max_y = min(chunk_min_y + args.chunk_size, max_y)
+                    chunk_min_z = min_z + cz * args.chunk_size
+                    chunk_max_z = min(chunk_min_z + args.chunk_size, max_z)
+
+                    # Filter verts and faces in chunk
+                    chunk_bm = bmesh.new()
+                    vert_map = {}
+                    for v in combined_bm.verts:
+                        if (chunk_min_x <= v.co.x < chunk_max_x and
+                            chunk_min_y <= v.co.y < chunk_max_y and
+                            chunk_min_z <= v.co.z < chunk_max_z):
+                            new_v = chunk_bm.verts.new(v.co)
+                            vert_map[v.index] = new_v
+                    chunk_bm.verts.ensure_lookup_table()
+                    if not chunk_bm.verts:
+                        chunk_bm.free()
+                        continue
+
+                    # Filter faces: only add faces where all verts are in chunk
+                    for face in combined_bm.faces:
+                        if all(idx in vert_map for idx in [v.index for v in face.verts]):
+                            new_verts = [vert_map[v.index] for v in face.verts]
+                            try:
+                                new_face = chunk_bm.faces.new(new_verts)
+                                new_face.material_index = face.material_index
+                            except Exception:
+                                pass
+                    chunk_bm.faces.ensure_lookup_table()
+                    chunk_bm.normal_update()
+
+                    # Calculate proportional voxel resolution for this chunk
+                    chunk_dim_x = (chunk_max_x - chunk_min_x) / args.blender_unit_to_node
+                    chunk_dim_y = (chunk_max_y - chunk_min_y) / args.blender_unit_to_node
+                    chunk_dim_z = (chunk_max_z - chunk_min_z) / args.blender_unit_to_node
+                    max_chunk_dim = max(chunk_dim_x, chunk_dim_y, chunk_dim_z)
+                    # Always use user-specified voxel_resolution for every chunk
+                    chunk_voxel_res = args.voxel_resolution
+
+                    # Estimate voxel count
+                    step = max_chunk_dim / float(chunk_voxel_res)
+                    nx_vox = max(1, int(chunk_dim_x / step) + 1) + 2 * args.side_padding
+                    ny_vox = max(1, int(chunk_dim_y / step) + 1) + 2 * args.side_padding
+                    nz_vox = max(1, int(chunk_dim_z / step) + 1) + args.side_padding + args.top_padding
+                    est_voxels = nx_vox * ny_vox * nz_vox
+                    if est_voxels > MAX_VOXELS_PER_CHUNK:
+                        print(f"[mts_exporter] WARNING: Skipping chunk {cx},{cy},{cz} (est. {est_voxels:,} voxels exceeds safe limit)")
+                        chunk_bm.free()
+                        continue
+
+                    chunk_name = f"{args.output_mts}_chunk_{cx}_{cy}_{cz}.mts"
+                    print(f"[mts_exporter] Exporting chunk {chunk_name} at voxel_res={chunk_voxel_res} (est. {est_voxels:,} voxels)")
+                    def chunk_progress(iy, ny, start_time):
+                        pass  # Optionally add progress per chunk
+                    info, err = voxelize_and_export(
+                        chunk_bm, obj_for_materials, chunk_name,
+                        chunk_voxel_res,
+                        args.side_padding,
+                        args.top_padding,
+                        not args.no_force_air,
+                        args.default_node,
+                        progress_callback=chunk_progress,
+                    )
+                    chunk_bm.free()
+                    if err:
+                        print(f"[mts_exporter] ERROR: {err} (chunk {chunk_name})")
+        print(f"[mts_exporter] Done chunked export.")
+        # If Old Machine Mode, try to auto-merge chunks
+        if getattr(args, 'old_machine', False):
+            try:
+                import subprocess
+                # Count nx, ny, nz by scanning chunk files
+                import glob
+                import re
+                chunk_files = glob.glob(f"{args.output_mts}_chunk_*.mts")
+                coords = [tuple(map(int, re.findall(r"(\d+)", f.split('_chunk_')[-1]))) for f in chunk_files]
+                if coords:
+                    max_x = max(c[0] for c in coords) + 1
+                    max_y = max(c[1] for c in coords) + 1
+                    max_z = max(c[2] for c in coords) + 1
+                    print(f"[mts_exporter] Auto-merging {len(chunk_files)} chunks: nx={max_x} ny={max_y} nz={max_z}")
+                    merge_cmd = [
+                        sys.executable, os.path.join(os.path.dirname(__file__), "mts_merge_chunks.py"),
+                        "--chunk-prefix", f"{args.output_mts}_chunk_",
+                        "--out", f"{args.output_mts}_merged.mts",
+                        "--nx", str(max_x), "--ny", str(max_y), "--nz", str(max_z)
+                    ]
+                    print(f"[mts_exporter] Running merge: {' '.join(merge_cmd)}")
+                    subprocess.run(merge_cmd, check=True)
+                    print(f"[mts_exporter] Merged output: {args.output_mts}_merged.mts")
+            except Exception as e:
+                print(f"[mts_exporter] Auto-merge failed: {e}")
+        return
+
+    # No chunking: normal export
     def cli_progress(iy, ny, start_time):
         now = time.time()
         # Only print every 5 seconds
@@ -488,8 +656,10 @@ def cli_main():
 # Entry point: auto-detect mode
 # ================================================================
 
+
+# Only define register/unregister for Blender's Add-on system
+# Do not call register() at import time; Blender handles this.
+
 if __name__ == "__main__":
     if _is_headless() and _has_cli_args():
         cli_main()
-    else:
-        register()

@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/home/l-dog/.local/lib/python3.13/site-packages')
 bl_info = {
     "name": "Export Minetest .mts (3D voxel grid, materials, progress)",
     "author": "L-Dog",
@@ -223,9 +225,17 @@ def voxelize_and_export(combined_bm, obj_for_materials, filepath,
 # GUI MODE — Blender addon operator
 # ================================================================
 
+
 from bpy.types import Operator
 from bpy.props import IntProperty, BoolProperty
 from bpy_extras.io_utils import ExportHelper
+import os
+try:
+    import numpy as np
+    from PIL import Image
+except ImportError:
+    np = None
+    Image = None
 
 
 class EXPORT_OT_minetest_mts(Operator, ExportHelper):
@@ -282,6 +292,84 @@ class EXPORT_OT_minetest_mts(Operator, ExportHelper):
         max=10000,
     )
 
+    export_colormap: BoolProperty(
+        name="Export Colormap PNG",
+        description="Export a colormap image alongside the .mts file",
+        default=False,
+    )
+    export_heightmap: BoolProperty(
+        name="Export Heightmap PNG",
+        description="Export a heightmap image alongside the .mts file",
+        default=False,
+    )
+
+
+    def export_images(self, obj, filepath, export_colormap, export_heightmap):
+        if not np or not Image:
+            self.report({'WARNING'}, "numpy and Pillow are required for image export.")
+            return
+        min_x, min_y, min_z = [float('inf')] * 3
+        max_x, max_y, max_z = [float('-inf')] * 3
+        for v in obj.data.vertices:
+            co = obj.matrix_world @ v.co
+            min_x, min_y, min_z = min(min_x, co.x), min(min_y, co.y), min(min_z, co.z)
+            max_x, max_y, max_z = max(max_x, co.x), max(max_y, co.y), max(max_z, co.z)
+        output_size = 512
+        color_img = np.zeros((output_size, output_size, 3), dtype=np.uint8)
+        height_img = np.zeros((output_size, output_size), dtype=np.uint8)
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        eval_obj = obj.evaluated_get(depsgraph)
+        def get_material_color(face, ix=None, iy=None):
+            try:
+                mat = obj.material_slots[face.material_index].material
+                if mat and hasattr(mat, 'diffuse_color') and mat.diffuse_color:
+                    rgb = [int(255 * c) for c in mat.diffuse_color[:3]]
+                    # Print color for debugging
+                    if ix is not None and iy is not None:
+                        print(f"[Colormap Debug] Pixel ({ix},{iy}) face {face.index} material '{mat.name}' color {rgb}")
+                    # If color is pure white, use magenta as fallback for visibility
+                    if rgb == [255, 255, 255]:
+                        return [255, 0, 255]
+                    return rgb
+            except Exception as e:
+                if ix is not None and iy is not None:
+                    print(f"[Colormap Debug] Pixel ({ix},{iy}) error: {e}")
+            # Fallback: magenta for missing/unknown
+            return [255, 0, 255]
+        for ix in range(output_size):
+            for iy in range(output_size):
+                fx = min_x + (max_x - min_x) * ix / (output_size - 1)
+                fy = min_y + (max_y - min_y) * iy / (output_size - 1)
+                from mathutils import Vector
+                origin = Vector((fx, fy, max_z + 10))
+                direction = Vector((0, 0, -1))
+                try:
+                    hit, loc, norm, face_idx = eval_obj.ray_cast(origin, direction)
+                except Exception:
+                    continue
+                if hit:
+                    z = loc.z
+                    hval = int(255 * (z - min_z) / (max_z - min_z))
+                    height_img[iy, ix] = hval
+                    try:
+                        face = eval_obj.data.polygons[face_idx]
+                        color_img[iy, ix] = get_material_color(face, ix, iy)
+                    except Exception as e:
+                        print(f"[Colormap Debug] Pixel ({ix},{iy}) face error: {e}")
+                        color_img[iy, ix] = [255, 0, 255]
+                else:
+                    height_img[iy, ix] = 0
+                    color_img[iy, ix] = [0, 0, 0]
+        base, _ = os.path.splitext(filepath)
+        if export_colormap:
+            color_path = base + "-colormap.png"
+            Image.fromarray(color_img[::-1, :, :], 'RGB').save(color_path)
+            self.report({'INFO'}, f"Colormap saved: {color_path}")
+        if export_heightmap:
+            height_path = base + "-heightmap.png"
+            Image.fromarray(height_img[::-1, :], 'L').save(height_path)
+            self.report({'INFO'}, f"Heightmap saved: {height_path}")
+
     def execute(self, context):
         obj = context.active_object
         if not obj or obj.type != 'MESH':
@@ -327,6 +415,9 @@ class EXPORT_OT_minetest_mts(Operator, ExportHelper):
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
         self.report({'INFO'}, f"Exported {info}")
+        # Export images if requested
+        if self.export_colormap or self.export_heightmap:
+            self.export_images(obj, self.filepath, self.export_colormap, self.export_heightmap)
         return {'FINISHED'}
 
 
@@ -337,13 +428,15 @@ def menu_func_export(self, context):
     )
 
 def draw(self, context):
-        layout = self.layout
-        layout.prop(self, "voxel_resolution")
-        layout.prop(self, "force_place_air")
-        layout.prop(self, "air_padding")
-        layout.prop(self, "top_air_padding")
-        layout.prop(self, "chunk_size")
-        layout.prop(self, "old_machine")
+    layout = self.layout
+    layout.prop(self, "voxel_resolution")
+    layout.prop(self, "force_place_air")
+    layout.prop(self, "air_padding")
+    layout.prop(self, "top_air_padding")
+    layout.prop(self, "chunk_size")
+    layout.prop(self, "old_machine")
+    layout.prop(self, "export_colormap")
+    layout.prop(self, "export_heightmap")
 
 def register():
     bpy.utils.register_class(EXPORT_OT_minetest_mts)

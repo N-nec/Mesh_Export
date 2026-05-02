@@ -16,8 +16,9 @@
 
 
 
-UPDATE: NOW EXPORTS .MTS FILES
-UPDATE: NOW EXPORTS COLOR AND HEIGHTMAP ... For MapGen
+# UPDATE: NOW EXPORTS .MTS FILES 
+
+# UPDATE: NOW EXPORTS COLOR AND HEIGHTMAP ... For MapGen
 
 ## Overview
 This Blender addon lets you export a selected mesh as a Minetest schematic in Lua table format, using Blender's Remesh (Blocks) modifier for voxelization.
